@@ -201,7 +201,7 @@ git push origin v0.1.0
 - macOS：`.dmg` / `.app`
 - Linux：`.deb` / `.AppImage`
 
-工作流默认创建 draft release。检查安装包无误后，在 GitHub 页面手动发布即可。
+构建产物会先作为 Actions artifacts 汇总，再由单独的 publish job 统一创建 Release，避免多平台并发时产生多个 draft。工作流默认创建 draft release，检查安装包无误后，在 GitHub 页面手动发布即可。
 
 默认构建不包含代码签名。Windows 可能弹出 SmartScreen 提示，macOS 可能触发 Gatekeeper 拦截；正式发布建议配置 Windows 代码签名证书和 Apple Developer 签名 / 公证。
 
@@ -214,8 +214,8 @@ Gitee 不支持 GitHub Actions。可选方案：
 
 ```bash
 export GITEE_TOKEN="你的 Gitee 私人令牌"
-export GITEE_OWNER="你的 Gitee 用户名"
-export GITEE_REPO="audio2sub"
+export GITEE_OWNER="lonffrey1"
+export GITEE_REPO="Audio2Sub"
 bash scripts/publish-gitee.sh v0.1.0 artifacts/*
 ```
 
@@ -224,8 +224,8 @@ bash scripts/publish-gitee.sh v0.1.0 artifacts/*
 同时需要把代码和标签推送到 Gitee：
 
 ```bash
-git remote add gitee https://gitee.com/你的用户名/audio2sub.git
-git push gitee main --tags
+git remote add gitee https://gitee.com/lonffrey1/Audio2Sub.git
+git push gitee master --tags
 ```
 
 如果不想使用脚本，也可以在 Gitee 网页端手动创建 Release 并上传安装包。Gitee 上的源码仓库可以镜像 GitHub，但构建产物和 Release 附件需要单独同步。

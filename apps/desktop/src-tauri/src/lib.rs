@@ -1,3 +1,5 @@
+mod tools;
+
 use audio2sub_core::{
     AppSettings, EndpointConfig, EndpointKind, EngineChoice, Ffmpeg, HistoryStore, ProgressEvent,
     ProgressSink, ProjectSummary, Segment, SettingsStore, SubtitleFormat, TranscribeRequest,
@@ -5,7 +7,7 @@ use audio2sub_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
@@ -14,9 +16,11 @@ use uuid::Uuid;
 const KEYRING_SERVICE: &str = "Audio2Sub";
 
 struct AppState {
-    service: TranscriptionService,
+    store: HistoryStore,
     settings: SettingsStore,
     tasks: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    app_data_dir: PathBuf,
+    install_cancel: Arc<Mutex<Option<CancellationToken>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -32,12 +36,6 @@ struct EndpointView {
 #[derive(Debug, Serialize)]
 struct SettingsView {
     endpoints: Vec<EndpointView>,
-}
-
-#[derive(Debug, Serialize)]
-struct EnvironmentStatus {
-    ffmpeg: bool,
-    ffprobe: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,17 +95,22 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let store = HistoryStore::open(data_dir.join("audio2sub.db"))?;
-            let service = TranscriptionService::new(Ffmpeg::default(), store);
             let settings = SettingsStore::new(data_dir.join("settings.json"));
             app.manage(AppState {
-                service,
+                store,
                 settings,
                 tasks: Arc::new(Mutex::new(HashMap::new())),
+                app_data_dir: data_dir,
+                install_cancel: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             check_environment,
+            install_ffmpeg,
+            cancel_ffmpeg_install,
+            set_ffmpeg_path,
+            reset_ffmpeg_path,
             get_settings,
             save_endpoint,
             delete_endpoint,
@@ -125,20 +128,79 @@ pub fn run() {
 }
 
 #[tauri::command]
-async fn check_environment() -> EnvironmentStatus {
-    let tools = Ffmpeg::default();
-    let ffmpeg = tool_available(&tools.ffmpeg).await;
-    let ffprobe = tool_available(&tools.ffprobe).await;
-    EnvironmentStatus { ffmpeg, ffprobe }
+async fn check_environment(state: State<'_, AppState>) -> Result<tools::ToolStatus, String> {
+    let settings = state.settings.load().map_err(display_error)?;
+    Ok(tools::status(&state.app_data_dir, &settings).await)
 }
 
-async fn tool_available(path: &std::path::Path) -> bool {
-    tokio::process::Command::new(path)
-        .arg("-version")
-        .output()
-        .await
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+#[tauri::command]
+async fn install_ffmpeg(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<tools::ToolStatus, String> {
+    let cancel = CancellationToken::new();
+    {
+        let mut slot = state
+            .install_cancel
+            .lock()
+            .map_err(|_| "安装锁错误".to_string())?;
+        if slot.is_some() {
+            return Err("已有 FFmpeg 安装任务正在进行".to_string());
+        }
+        *slot = Some(cancel.clone());
+    }
+
+    let app_data_dir = state.app_data_dir.clone();
+    let settings_store = state.settings.clone();
+    let cancel_slot = state.install_cancel.clone();
+    let progress_handle = app.clone();
+    let progress = move |event: tools::InstallProgress| {
+        let _ = progress_handle.emit("ffmpeg-install-progress", event);
+    };
+
+    let result = tools::install(&app_data_dir, cancel, &progress).await;
+    if let Ok(mut slot) = cancel_slot.lock() {
+        *slot = None;
+    }
+    result?;
+
+    let settings = settings_store.load().map_err(display_error)?;
+    Ok(tools::status(&app_data_dir, &settings).await)
+}
+
+#[tauri::command]
+fn cancel_ffmpeg_install(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(token) = state
+        .install_cancel
+        .lock()
+        .map_err(|_| "安装锁错误".to_string())?
+        .as_ref()
+    {
+        token.cancel();
+    }
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_ffmpeg_path(
+    state: State<'_, AppState>,
+    ffmpeg_path: String,
+) -> Result<tools::ToolStatus, String> {
+    let (ffmpeg, ffprobe) = tools::validate_custom(Path::new(&ffmpeg_path)).await?;
+    let mut settings = state.settings.load().map_err(display_error)?;
+    settings.ffmpeg_path = Some(ffmpeg.display().to_string());
+    settings.ffprobe_path = Some(ffprobe.display().to_string());
+    state.settings.save(&settings).map_err(display_error)?;
+    Ok(tools::status(&state.app_data_dir, &settings).await)
+}
+
+#[tauri::command]
+async fn reset_ffmpeg_path(state: State<'_, AppState>) -> Result<tools::ToolStatus, String> {
+    let mut settings = state.settings.load().map_err(display_error)?;
+    settings.ffmpeg_path = None;
+    settings.ffprobe_path = None;
+    state.settings.save(&settings).map_err(display_error)?;
+    Ok(tools::status(&state.app_data_dir, &settings).await)
 }
 
 #[tauri::command]
@@ -244,8 +306,8 @@ async fn test_endpoint(state: State<'_, AppState>, input: EndpointInput) -> Resu
         })
         .ok_or_else(|| "API Key 未配置".to_string())?;
 
-    state
-        .service
+    let service = TranscriptionService::new(Ffmpeg::default(), state.store.clone());
+    service
         .test_openai(base_url, &api_key, model)
         .await
         .map_err(display_error)?;
@@ -258,8 +320,7 @@ fn list_history(
     limit: Option<usize>,
 ) -> Result<Vec<ProjectSummary>, String> {
     state
-        .service
-        .store()
+        .store
         .list_projects(limit.unwrap_or(50))
         .map_err(display_error)
 }
@@ -269,20 +330,12 @@ fn get_project(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Option<TranscriptionResult>, String> {
-    state
-        .service
-        .store()
-        .get_project(&id)
-        .map_err(display_error)
+    state.store.get_project(&id).map_err(display_error)
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn delete_project(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state
-        .service
-        .store()
-        .delete_project(&id)
-        .map_err(display_error)
+    state.store.delete_project(&id).map_err(display_error)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -292,8 +345,7 @@ fn save_project_segments(
     segments: Vec<Segment>,
 ) -> Result<(), String> {
     state
-        .service
-        .store()
+        .store
         .update_segments(&project_id, &segments)
         .map_err(display_error)
 }
@@ -309,6 +361,7 @@ async fn transcribe_file(
         return Err(format!("文件不存在: {}", path.display()));
     }
     let engine = resolve_engine(state.inner(), &input.engine)?;
+    let service = build_service(state.inner()).await?;
     let task_id = input
         .task_id
         .filter(|value| !value.trim().is_empty())
@@ -320,7 +373,6 @@ async fn transcribe_file(
         .map_err(|_| "任务锁错误".to_string())?
         .insert(task_id.clone(), cancel.clone());
 
-    let service = state.service.clone();
     let tasks = state.tasks.clone();
     let event_task_id = task_id.clone();
     let handle = app.clone();
@@ -385,8 +437,7 @@ fn cancel_task(state: State<'_, AppState>, task_id: String) -> Result<(), String
 fn export_subtitles(state: State<'_, AppState>, input: ExportInput) -> Result<String, String> {
     if let Some(project_id) = &input.project_id {
         state
-            .service
-            .store()
+            .store
             .update_segments(project_id, &input.segments)
             .map_err(display_error)?;
     }
@@ -399,6 +450,18 @@ fn export_subtitles(state: State<'_, AppState>, input: ExportInput) -> Result<St
     let text = audio2sub_core::subtitle::render(&input.segments, input.format);
     std::fs::write(&output_path, text).map_err(display_error)?;
     Ok(output_path.display().to_string())
+}
+
+async fn build_service(state: &AppState) -> Result<TranscriptionService, String> {
+    let settings = state.settings.load().map_err(display_error)?;
+    let tools = tools::resolve(&state.app_data_dir, &settings).await;
+    if !tools::tool_available(&tools.ffmpeg).await || !tools::tool_available(&tools.ffprobe).await {
+        return Err("未检测到 FFmpeg，请先安装 FFmpeg 组件".to_string());
+    }
+    Ok(TranscriptionService::new(
+        tools.to_ffmpeg(),
+        state.store.clone(),
+    ))
 }
 
 fn endpoint_view(settings: &AppSettings, endpoint: &EndpointConfig) -> EndpointView {

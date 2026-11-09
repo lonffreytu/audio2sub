@@ -16,6 +16,22 @@ export type SettingsView = {
 export type EnvironmentStatus = {
   ffmpeg: boolean;
   ffprobe: boolean;
+  source: "env" | "custom" | "managed" | "system" | "missing" | string;
+  ffmpeg_path: string | null;
+  ffprobe_path: string | null;
+  version: string | null;
+  install_supported: boolean;
+  install_size: number;
+  license_url: string;
+  source_url: string;
+};
+
+export type InstallProgress = {
+  percent: number;
+  stage: string;
+  message: string;
+  downloaded: number;
+  total: number;
 };
 
 export type EndpointDraft = {

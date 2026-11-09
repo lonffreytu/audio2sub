@@ -9,6 +9,7 @@ import type {
   EndpointView,
   EnvironmentStatus,
   FinishedPayload,
+  InstallProgress,
   Message,
   ProgressPayload,
   ProjectSummary,
@@ -104,6 +105,27 @@ function parseTime(text: string): number | null {
   return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis;
 }
 
+function formatBytes(bytes: number): string {
+  if (!bytes) return "未知大小";
+  const megabytes = bytes / 1_000_000;
+  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+}
+
+function sourceLabel(source?: string): string {
+  switch (source) {
+    case "env":
+      return "环境变量";
+    case "custom":
+      return "自定义路径";
+    case "managed":
+      return "应用内安装";
+    case "system":
+      return "系统 PATH";
+    default:
+      return "未检测到";
+  }
+}
+
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -176,9 +198,22 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [environment, setEnvironment] = useState<EnvironmentStatus | null>(null);
+  const [ffmpegSetupOpen, setFfmpegSetupOpen] = useState(false);
+  const [ffmpegInstalling, setFfmpegInstalling] = useState(false);
+  const [ffmpegProgress, setFfmpegProgress] = useState<InstallProgress | null>(null);
+  const [ffmpegError, setFfmpegError] = useState("");
+  const [ffmpegDismissed, setFfmpegDismissed] = useState(
+    () => localStorage.getItem("ffmpeg-setup-dismissed") === "1",
+  );
   const [draft, setDraft] = useState<EndpointDraft | null>(null);
   const taskIdRef = useRef("");
   const runningRef = useRef(false);
+
+  const refreshEnvironment = useCallback(async () => {
+    const status = await invoke<EnvironmentStatus>("check_environment");
+    setEnvironment(status);
+    return status;
+  }, []);
 
   const refreshSettings = useCallback(async () => {
     const view = await invoke<SettingsView>("get_settings");
@@ -195,10 +230,18 @@ export default function App() {
       setMessage({ type: "error", text: String(error) });
     });
     refreshHistory().catch(() => {});
-    invoke<EnvironmentStatus>("check_environment")
-      .then(setEnvironment)
-      .catch(() => {});
-  }, [refreshSettings, refreshHistory]);
+    refreshEnvironment().catch(() => {});
+  }, [refreshSettings, refreshHistory, refreshEnvironment]);
+
+  useEffect(() => {
+    if (
+      environment &&
+      (!environment.ffmpeg || !environment.ffprobe) &&
+      !ffmpegDismissed
+    ) {
+      setFfmpegSetupOpen(true);
+    }
+  }, [environment, ffmpegDismissed]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -216,16 +259,30 @@ export default function App() {
   }, [message]);
 
   useEffect(() => {
-    if (!settingsOpen && !aboutOpen) return;
+    if (!settingsOpen && !aboutOpen && !ffmpegSetupOpen) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSettingsOpen(false);
         setAboutOpen(false);
+        if (!ffmpegInstalling) setFfmpegSetupOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [settingsOpen, aboutOpen]);
+  }, [settingsOpen, aboutOpen, ffmpegSetupOpen, ffmpegInstalling]);
+
+  useEffect(() => {
+    const listener = listen<InstallProgress>(
+      "ffmpeg-install-progress",
+      (event) => {
+        setFfmpegProgress(event.payload);
+        setFfmpegInstalling(true);
+      },
+    );
+    return () => {
+      listener.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     const progressListener = listen<ProgressPayload>(
@@ -322,9 +379,80 @@ export default function App() {
     }
   };
 
+  const openFfmpegSetup = () => {
+    setFfmpegError("");
+    setFfmpegSetupOpen(true);
+  };
+
+  const dismissFfmpegSetup = () => {
+    if (ffmpegInstalling) return;
+    setFfmpegSetupOpen(false);
+    setFfmpegDismissed(true);
+    localStorage.setItem("ffmpeg-setup-dismissed", "1");
+  };
+
+  const installFfmpeg = async () => {
+    setFfmpegError("");
+    setFfmpegInstalling(true);
+    setFfmpegProgress(null);
+    try {
+      const status = await invoke<EnvironmentStatus>("install_ffmpeg");
+      setEnvironment(status);
+      setFfmpegInstalling(false);
+      setFfmpegProgress(null);
+      setFfmpegSetupOpen(false);
+      setFfmpegDismissed(false);
+      localStorage.removeItem("ffmpeg-setup-dismissed");
+      setMessage({ type: "success", text: "FFmpeg 安装完成" });
+    } catch (error) {
+      setFfmpegInstalling(false);
+      setFfmpegError(String(error));
+    }
+  };
+
+  const cancelFfmpegInstall = async () => {
+    try {
+      await invoke("cancel_ffmpeg_install");
+      setMessage({ type: "info", text: "正在取消 FFmpeg 安装..." });
+    } catch (error) {
+      setFfmpegError(String(error));
+    }
+  };
+
+  const chooseFfmpegPath = async () => {
+    try {
+      const selected = await open({ multiple: false, directory: false });
+      if (typeof selected !== "string") return;
+      const status = await invoke<EnvironmentStatus>("set_ffmpeg_path", {
+        ffmpeg_path: selected,
+      });
+      setEnvironment(status);
+      setFfmpegError("");
+      setFfmpegSetupOpen(false);
+      setMessage({ type: "success", text: "FFmpeg 路径已更新" });
+    } catch (error) {
+      setFfmpegError(String(error));
+    }
+  };
+
+  const resetFfmpegPath = async () => {
+    try {
+      const status = await invoke<EnvironmentStatus>("reset_ffmpeg_path");
+      setEnvironment(status);
+      setMessage({ type: "success", text: "已恢复自动检测" });
+    } catch (error) {
+      setFfmpegError(String(error));
+    }
+  };
+
   const startTranscription = async () => {
     if (!filePath) {
       setMessage({ type: "error", text: "请先选择音频或视频文件" });
+      return;
+    }
+    if (!environment?.ffmpeg || !environment?.ffprobe) {
+      setMessage({ type: "error", text: "请先安装 FFmpeg" });
+      openFfmpegSetup();
       return;
     }
     const endpoint = endpoints.find((item) => `endpoint:${item.id}` === engine);
@@ -634,9 +762,10 @@ export default function App() {
 
       {environment && (!environment.ffmpeg || !environment.ffprobe) && (
         <div className="env-warning">
-          未检测到 {!environment.ffmpeg ? "ffmpeg" : ""}
-          {!environment.ffmpeg && !environment.ffprobe ? " 和 " : ""}
-          {!environment.ffprobe ? "ffprobe" : ""}，请安装 FFmpeg 并加入 PATH。
+          <span>未检测到 FFmpeg，音视频处理功能不可用。</span>
+          <button className="mini-button" onClick={openFfmpegSetup}>
+            安装 FFmpeg
+          </button>
         </div>
       )}
 
@@ -846,6 +975,54 @@ export default function App() {
               </button>
             </div>
 
+            <div className="ffmpeg-settings">
+              <div className="ffmpeg-settings-head">
+                <div>
+                  <h3>FFmpeg 工具</h3>
+                  <p className="hint">用于提取音轨和读取媒体信息。</p>
+                </div>
+                <span
+                  className={`status-pill ${
+                    environment?.ffmpeg && environment?.ffprobe ? "ok" : "missing"
+                  }`}
+                >
+                  {environment?.ffmpeg && environment?.ffprobe ? "已就绪" : "缺失"}
+                </span>
+              </div>
+              <div className="ffmpeg-meta">
+                <span>{sourceLabel(environment?.source)}</span>
+                {environment?.version && (
+                  <span className="ffmpeg-version">{environment.version}</span>
+                )}
+                {environment?.ffmpeg_path && (
+                  <span className="ffmpeg-path">{environment.ffmpeg_path}</span>
+                )}
+              </div>
+              <div className="form-actions">
+                <button className="mini-button" onClick={openFfmpegSetup}>
+                  {environment?.ffmpeg && environment?.ffprobe ? "管理" : "安装"}
+                </button>
+                <button className="mini-button" onClick={chooseFfmpegPath}>
+                  选择路径
+                </button>
+                {environment?.source === "custom" && (
+                  <button className="mini-button" onClick={resetFfmpegPath}>
+                    恢复自动
+                  </button>
+                )}
+                <button
+                  className="mini-button"
+                  onClick={() =>
+                    refreshEnvironment().catch((error) =>
+                      setMessage({ type: "error", text: String(error) }),
+                    )
+                  }
+                >
+                  重新检测
+                </button>
+              </div>
+            </div>
+
             <div className="endpoint-list">
               {endpoints.length === 0 && (
                 <div className="empty-small">还没有自定义接口</div>
@@ -955,6 +1132,122 @@ export default function App() {
                 添加接口
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {ffmpegSetupOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={ffmpegInstalling ? undefined : dismissFfmpegSetup}
+        >
+          <div
+            className="modal ffmpeg-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>需要 FFmpeg</h2>
+                <p className="hint">
+                  Audio2Sub 使用 FFmpeg 提取音轨和读取媒体信息。
+                </p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={dismissFfmpegSetup}
+                disabled={ffmpegInstalling}
+              >
+                ×
+              </button>
+            </div>
+
+            {environment?.ffmpeg && environment?.ffprobe ? (
+              <div className="ffmpeg-ready">
+                <span className="status-dot ok" />
+                <div>
+                  <strong>FFmpeg 已就绪</strong>
+                  <p>{environment.version || "版本未知"}</p>
+                  {environment.ffmpeg_path && (
+                    <p className="ffmpeg-path">{environment.ffmpeg_path}</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="hint">
+                  {environment?.install_supported
+                    ? `可以自动下载并安装到本应用目录，不需要管理员权限。下载约 ${formatBytes(
+                        environment.install_size,
+                      )}。`
+                    : "当前平台暂不支持自动安装，请按下方说明手动安装。"}
+                </p>
+                {ffmpegInstalling && (
+                  <div className="install-progress">
+                    <div className="progress-bar">
+                      <div
+                        style={{ width: `${ffmpegProgress?.percent ?? 0}%` }}
+                      />
+                    </div>
+                    <div className="progress-text">
+                      {ffmpegProgress
+                        ? `${ffmpegProgress.percent}% · ${ffmpegProgress.message}`
+                        : "正在准备下载..."}
+                    </div>
+                  </div>
+                )}
+                {ffmpegError && <div className="warning">{ffmpegError}</div>}
+                <div className="form-actions">
+                  {environment?.install_supported && (
+                    <button
+                      className="btn"
+                      onClick={installFfmpeg}
+                      disabled={ffmpegInstalling}
+                    >
+                      {ffmpegInstalling ? "安装中..." : "一键安装 FFmpeg"}
+                    </button>
+                  )}
+                  {ffmpegInstalling && (
+                    <button className="btn secondary" onClick={cancelFfmpegInstall}>
+                      取消
+                    </button>
+                  )}
+                  <button className="btn secondary" onClick={chooseFfmpegPath}>
+                    选择已安装的 ffmpeg
+                  </button>
+                  <button
+                    className="btn secondary"
+                    onClick={() =>
+                      refreshEnvironment().catch((error) =>
+                        setFfmpegError(String(error)),
+                      )
+                    }
+                  >
+                    重新检测
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="manual-install">
+              <h3>手动安装</h3>
+              <p>
+                Windows：<code>winget install ffmpeg</code>
+              </p>
+              <p>
+                macOS：<code>brew install ffmpeg</code>
+              </p>
+              <p>
+                Linux：<code>sudo apt install ffmpeg</code>
+              </p>
+              <p className="hint">
+                Windows 也可从{" "}
+                <span className="link-text">https://www.gyan.dev/ffmpeg/builds/</span>{" "}
+                下载，解压后将 ffmpeg 所在目录加入 PATH。
+              </p>
+              <p className="hint">
+                自动安装使用第三方静态构建，FFmpeg 按其自身许可证分发。
+              </p>
+            </div>
           </div>
         </div>
       )}

@@ -25,7 +25,7 @@ Windows 已完成本地运行验证；macOS / Linux 已纳入 CI 编译检查，
 - SQLite 历史记录，支持重新打开和继续编辑
 - API Key 存入系统凭据管理器，不写入项目文件
 - 深色 / 浅色主题
-- 启动时检测 ffmpeg / ffprobe，缺失时给出提示
+- 启动时检测 FFmpeg，缺失时可在应用内一键安装或手动指定路径
 
 ## 界面预览
 
@@ -89,21 +89,19 @@ Windows 已完成本地运行验证；macOS / Linux 已纳入 CI 编译检查，
 
 国内访问 GitHub 较慢时，优先使用 Gitee。如果页面暂时没有安装包，说明该版本还在构建中。
 
-### 先安装 FFmpeg
+### FFmpeg 安装
 
-Audio2Sub 本身不内置 FFmpeg，需要系统已经安装 `ffmpeg` 和 `ffprobe`，并且能在终端中直接调用。
+Audio2Sub 依赖 FFmpeg 提取音轨和读取媒体信息。有两种方式：
+
+1. **应用内一键安装（推荐）**：首次启动检测不到 FFmpeg 时，弹窗会提供「一键安装 FFmpeg」。程序会把静态构建下载到应用数据目录下的 `tools/ffmpeg`，校验 SHA-256 后安装，不需要管理员权限，也不会修改系统 PATH。
+2. **使用系统已安装的 FFmpeg**：如果终端里能运行 `ffmpeg -version` 和 `ffprobe -version`，应用会自动检测；也可以在弹窗中手动选择 `ffmpeg` 可执行文件。
+
+自动安装目前支持 Windows x64、macOS Apple Silicon / Intel 和 Linux x64，需要联网下载约 94–257 MB 的文件。下载失败时，可以按弹窗中的命令手动安装：
 
 Windows：
 
 ```powershell
 winget install ffmpeg
-```
-
-安装后重新打开终端，确认：
-
-```powershell
-ffmpeg -version
-ffprobe -version
 ```
 
 macOS：
@@ -118,14 +116,16 @@ Linux：
 sudo apt install ffmpeg
 ```
 
-如果应用启动后提示未检测到 FFmpeg，安装完成后重启 Audio2Sub 即可。
+安装后如果应用仍未检测到，点击弹窗中的「重新检测」；修改过 PATH 的话，重新打开 Audio2Sub 即可。
+
+如果 GitHub 直连下载失败，程序会自动尝试公共 GitHub 代理 `gh-proxy.com`，下载内容仍会做 SHA-256 校验。也可以通过环境变量 `AUDIO2SUB_FFMPEG_MIRROR` 指定自定义下载源（文件名需与官方资源一致），设置后不再自动切换备用源。自动安装使用的是第三方静态构建，FFmpeg 按其自身许可证分发。
 
 ### Windows 安装
 
 下载以下任意一个文件：
 
-- `Audio2Sub_0.1.0_x64-setup.exe`（NSIS 安装包，推荐）
-- `Audio2Sub_0.1.0_x64_en-US.msi`（MSI 安装包）
+- `Audio2Sub_0.2.0_x64-setup.exe`（NSIS 安装包，推荐）
+- `Audio2Sub_0.2.0_x64_en-US.msi`（MSI 安装包）
 
 双击安装即可。当前版本没有代码签名，Windows SmartScreen 可能提示风险，点击「更多信息」然后选择「仍要运行」。
 
@@ -135,8 +135,8 @@ sudo apt install ffmpeg
 
 根据芯片选择：
 
-- Apple Silicon（M1 / M2 / M3 / M4）：下载 `Audio2Sub_0.1.0_aarch64.dmg`
-- Intel Mac：下载 `Audio2Sub_0.1.0_x64.dmg`
+- Apple Silicon（M1 / M2 / M3 / M4）：下载 `Audio2Sub_0.2.0_aarch64.dmg`
+- Intel Mac：下载 `Audio2Sub_0.2.0_x64.dmg`
 
 打开 DMG，把 Audio2Sub 拖进「应用程序」。
 
@@ -149,26 +149,26 @@ sudo apt install ffmpeg
 Debian / Ubuntu 下载 `.deb`：
 
 ```bash
-sudo apt install ./Audio2Sub_0.1.0_amd64.deb
+sudo apt install ./Audio2Sub_0.2.0_amd64.deb
 ```
 
 其他发行版下载 `.AppImage`：
 
 ```bash
-chmod +x Audio2Sub_0.1.0_amd64.AppImage
-./Audio2Sub_0.1.0_amd64.AppImage
+chmod +x Audio2Sub_0.2.0_amd64.AppImage
+./Audio2Sub_0.2.0_amd64.AppImage
 ```
 
 如果 AppImage 提示 FUSE 相关错误，可以安装 `libfuse2`，或者使用：
 
 ```bash
-./Audio2Sub_0.1.0_amd64.AppImage --appimage-extract-and-run
+./Audio2Sub_0.2.0_amd64.AppImage --appimage-extract-and-run
 ```
 
 ### 首次启动
 
 1. 打开 Audio2Sub。
-2. 如果提示未检测到 `ffmpeg` / `ffprobe`，先安装 FFmpeg 并重启应用。
+2. 如果提示未检测到 FFmpeg，按弹窗提示一键安装，或选择已安装的 `ffmpeg`；完成后点击「重新检测」。
 3. 默认引擎是「必剪（B 站，免费）」，不需要账号和 API Key。
 4. 如果必剪不可用，可以在「设置」中添加 OpenAI、Groq、硅基流动或其他 OpenAI 兼容接口。
 
@@ -219,9 +219,9 @@ API Key 会保存到系统凭据管理器：
 
 必剪返回的是纯文本，时间轴由程序按字数估算。需要更精确的逐句时间戳时，请使用 Whisper 类接口（Groq / OpenAI / 硅基流动）。
 
-### 提示未检测到 ffmpeg / ffprobe
+### 提示未检测到 FFmpeg
 
-说明系统 PATH 中没有 FFmpeg。安装后重新打开终端和应用：
+优先点击弹窗中的「一键安装 FFmpeg」，程序会自动下载并校验。如果下载失败，可以手动安装：
 
 ```powershell
 winget install ffmpeg
@@ -234,6 +234,8 @@ brew install ffmpeg
 ```bash
 sudo apt install ffmpeg
 ```
+
+已经安装但仍然检测不到时，在弹窗或设置中点击「选择已安装的 ffmpeg」，手动指定可执行文件；修改过 PATH 的话，重新打开应用。
 
 ### Windows 提示 SmartScreen 风险
 
@@ -265,14 +267,14 @@ macOS:   ~/Library/Application Support/cc.audio2sub.desktop
 Linux:   ~/.local/share/cc.audio2sub.desktop
 ```
 
-其中包含 `audio2sub.db` 和 `settings.json`。
+其中包含 `audio2sub.db`、`settings.json`；使用应用内一键安装时，FFmpeg 会放在 `tools/ffmpeg`。
 
 ## 已知限制
 
 - 必剪接口为非公开接口，可能失效；建议配置其他引擎或后续使用本地模型兜底。
 - OpenAI 兼容接口暂未对超过约 25MB 的长音频做自动切片。
 - 暂未提供波形图、视频预览和时间轴拖拽。
-- FFmpeg 未打包进安装包，需要用户自行安装并配置 PATH。
+- 应用内自动安装 FFmpeg 需要联网下载约 94–257 MB 的静态构建；离线环境需自行安装 FFmpeg。
 - macOS / Linux 已通过 CI 编译检查，但尚未完成实机运行验证。
 - 暂未提供安装包签名和自动更新。
 
@@ -347,7 +349,7 @@ audio2sub history --data-dir ".\data"
 - 异步运行时：Tokio
 - HTTP：reqwest
 - 数据库：SQLite（rusqlite）
-- 音视频处理：系统 FFmpeg / ffprobe
+- 音视频处理：FFmpeg / ffprobe（应用内安装或系统安装）
 - API Key 存储：系统凭据管理器（keyring）
 
 ### 项目结构
@@ -500,7 +502,7 @@ cargo test --workspace
 
 - 字幕时间格式、SRT / VTT / TXT 输出
 - 中文断句、英文断词、时间轴分配
-- FFmpeg 探测与音频提取
+- FFmpeg 探测、音频提取，以及下载 / SHA-256 校验 / 安装冒烟测试
 - 必剪完整上传 / 轮询流程（WireMock，不请求真实服务）
 - OpenAI 兼容接口解析、错误处理、纯文本回退
 - SQLite 历史记录
@@ -509,6 +511,15 @@ cargo test --workspace
 
 CI 配置见 `.github/workflows/ci.yml`。
 
+FFmpeg 安装冒烟测试默认忽略，会真实下载并安装到临时目录：
+
+```powershell
+$env:AUDIO2SUB_TEST_FFMPEG_INSTALL = "1"
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml installs_ffmpeg_smoke -- --ignored --nocapture
+```
+
+测试会先临时清空 `PATH` 和 `AUDIO2SUB_FFMPEG*`，断言状态为 `missing`，再下载并校验，最后确认状态恢复为 `managed`。可以用 `AUDIO2SUB_FFMPEG_MIRROR` 指向本地静态文件服务，跳过公网下载。
+
 ### 发布安装包
 
 #### GitHub Actions 自动构建
@@ -516,8 +527,8 @@ CI 配置见 `.github/workflows/ci.yml`。
 仓库包含 `.github/workflows/release.yml`。推送 `v*` 标签时，会自动在 Windows、macOS、Linux 上构建安装包：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 产物包括：
@@ -541,7 +552,7 @@ Gitee 不支持 GitHub Actions。可选方案：
 export GITEE_TOKEN="你的 Gitee 私人令牌"
 export GITEE_OWNER="lonffrey1"
 export GITEE_REPO="Audio2Sub"
-bash scripts/publish-gitee.sh v0.1.0 artifacts/*
+bash scripts/publish-gitee.sh v0.2.0 artifacts/*
 ```
 
 脚本会创建（或复用）对应 tag 的 Gitee Release，并上传安装包。Gitee 私人令牌需要 `projects` 权限；发布前请确认 Gitee Release 的单文件大小限制。

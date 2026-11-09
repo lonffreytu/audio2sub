@@ -62,6 +62,10 @@ impl EndpointConfig {
 pub struct AppSettings {
     #[serde(default)]
     pub endpoints: Vec<EndpointConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ffmpeg_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ffprobe_path: Option<String>,
 }
 
 impl AppSettings {

@@ -36,6 +36,7 @@ if [[ "${SKIP_DESKTOP:-0}" != "1" ]]; then
     run "桌面端格式检查" cargo fmt -- --check
     run "桌面端 Clippy" cargo clippy --all-targets -- -D warnings
     run "桌面端编译检查" cargo check
+    run "桌面端测试" cargo test
     popd >/dev/null
 fi
 

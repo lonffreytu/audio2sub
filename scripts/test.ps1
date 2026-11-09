@@ -67,6 +67,11 @@ try {
             Write-Host "==> 桌面端编译检查" -ForegroundColor Cyan
             cargo check
             Assert-LastExitCode "桌面端编译检查"
+
+            Write-Host ""
+            Write-Host "==> 桌面端测试" -ForegroundColor Cyan
+            cargo test
+            Assert-LastExitCode "桌面端测试"
         }
         finally {
             Pop-Location

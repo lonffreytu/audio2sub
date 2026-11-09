@@ -208,6 +208,10 @@ select:focus {
 }
 
 .env-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 12px 22px 0;
   padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border));
@@ -215,6 +219,12 @@ select:focus {
   background: color-mix(in srgb, var(--error) 10%, var(--panel));
   color: var(--error);
   font-size: 12px;
+}
+
+.env-warning .mini-button {
+  flex-shrink: 0;
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+  color: var(--error);
 }
 
 .layout {
@@ -656,6 +666,59 @@ select:focus {
   font-size: 18px;
 }
 
+.ffmpeg-settings {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-strong);
+}
+
+.ffmpeg-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ffmpeg-settings h3 {
+  margin: 0 0 3px;
+  font-size: 13px;
+}
+
+.ffmpeg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ffmpeg-path {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-pill.ok {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.status-pill.missing {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
+}
+
 .endpoint-list {
   display: flex;
   flex-direction: column;
@@ -757,6 +820,64 @@ select:focus {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.ffmpeg-modal {
+  width: min(620px, 100%);
+}
+
+.ffmpeg-ready {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--success) 8%, var(--panel-strong));
+}
+
+.ffmpeg-ready p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.install-progress {
+  margin: 16px 0;
+}
+
+.manual-install {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.manual-install h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+}
+
+.manual-install p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.manual-install code {
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-strong);
+  font-size: 11px;
+}
+
+.link-text {
+  color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 .about-modal {

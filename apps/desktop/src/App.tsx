@@ -990,11 +990,6 @@ export default function App() {
                 onCopy={() => copyText("lonffrey@163.com", "邮箱")}
               />
               <ContactRow
-                label="QQ 交流群"
-                value="1103796619"
-                onCopy={() => copyText("1103796619", "QQ 群号")}
-              />
-              <ContactRow
                 label="小红书"
                 value="indieDevLong（程序员龙龙）"
                 onCopy={() => copyText("indieDevLong", "小红书号")}
